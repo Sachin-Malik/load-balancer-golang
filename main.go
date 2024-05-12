@@ -1,90 +1,33 @@
 package main
 
 import (
+	"errors"
 	"fmt"
-	"math/rand"
-	"strconv"
+	"net/http"
+	"os"
 	"time"
-	"sync"
 )
 
-type Request struct {
-	time int
-	requestId string
-	payload string
-}
+var payloads []string = []string{"Sachin", "malik", "nitin", "jatin", "ekta"}
 
-func initLoadBalancer() LoadBalancer{
-	var dummyServers []Server
-	for i:=0;i<10;i++ {
-		server := Server{
-				capacity:5,
-				cache:map[string]string{},
-				database:map[string]string{},
-				connections:0,
-			}
-		dummyServers = append(dummyServers,server);
-		}
-		lb := LoadBalancer{
-			servers:dummyServers,
-		}
-	return lb
-}
 func main() {
 	lb := initLoadBalancer()
-	payload := []string {"Sachin","malik","nitin","jatin","ekta"}
+	done := make(chan bool)
+	go lb.startHealthCheck(done)
+	fmt.Println("Processing requests....")
+	// registering request
+	http.HandleFunc("/", getRoot)
+	http.HandleFunc("/hello", lbHandler(&lb))
 
-	fmt.Println("Processing requests....");
-
-	// if we dont use go routines, then we won't be able to process request concurrently
-	// below example will take more than 5 seconds (each request X 1sec)
-
-
-	/*###################################
-	
-	Uncomment the below lines to see 
-	how it runs without conurrency
-	
-	####################################*/
-
-	// start := time.Now()
-	// var dummyRequest []Request
-	// for i:=0;i<5;i++{
-	// 	id := strconv.Itoa(rand.Intn(1000000))
-	// 	req := Request{
-	// 		time:1,
-	// 		requestId: id,
-	// 		payload:payload[i],
-	// 	}
-	// 	dummyRequest = append(dummyRequest,req);
-	// }
-	// for _, request := range dummyRequest {
-	// 	func (req Request){
-	// 		 lb.sendRequest(req);
-	// 	}(request)
-	// }
-	// fmt.Println("all requests took", time.Since(start));
-
-	// Here we are using go routines, so 5 request each taking 1 second will only take 1 second.
-	start := time.Now()
-	var dummyRequest []Request
-	for i:=0;i<5;i++{
-		id := strconv.Itoa(rand.Intn(1000000))
-		req := Request{
-			time:1,
-			requestId: id,
-			payload:payload[i],
-		}
-		dummyRequest = append(dummyRequest,req);
+	err := http.ListenAndServe(":6000", nil)
+	if errors.Is(err, http.ErrServerClosed) {
+		fmt.Printf("server closed\n")
+	} else if err != nil {
+		fmt.Printf("error starting server: %s\n", err)
+		os.Exit(1)
 	}
-	wg := sync.WaitGroup{}
-	for _, request := range dummyRequest {
-     wg.Add(1);
-		go func (req Request){
-			 defer wg.Done()
-			 lb.sendRequest(req);
-		}(request)
-	}
-	wg.Wait();
-	fmt.Println("all requests took", time.Since(start));
+	time.Sleep(100 * time.Second)
+	// closing done will stop our healthcheck
+	// here we are taking down our server after 100 secs, so we close all channels as well.
+	close(done)
 }
